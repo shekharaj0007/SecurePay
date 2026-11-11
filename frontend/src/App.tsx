@@ -1,22 +1,27 @@
 import { FormEvent, useEffect, useState } from "react"
 import {
   ApiError,
+  apiKeys,
   audit,
   capturePayment,
   createPayment,
+  disputes,
   getToken,
   ledger,
   login,
   me,
+  outbox,
   overview,
   payments,
+  payouts,
   refundPayment,
   setToken,
 } from "./api"
+import { DisputesView, KeysView, OutboxView, SettlementView } from "./features"
 import { dollarsToCents, formatMoney, formatWhen, newIdempotencyKey, reasonText } from "./format"
-import type { AuditRow, LedgerAccount, Me, Overview, Payment, Role } from "./types"
+import type { ApiKeyRow, AuditRow, Dispute, LedgerAccount, Me, OutboxEvent, Overview, Payment, PayoutList, Role } from "./types"
 
-type View = "overview" | "payments" | "ledger" | "audit"
+type View = "overview" | "payments" | "ledger" | "disputes" | "settlement" | "keys" | "outbox" | "audit"
 type Banner = { tone: "ok" | "err"; text: string }
 
 function SimulationBar() {
@@ -65,7 +70,8 @@ function Login({ onSuccess }: { onSuccess: (person: Me) => void }) {
             <h1>A ledger that does not forget a replay.</h1>
             <p className="lede">
               Create a payment intent, let the risk rules speak, then capture once. The same idempotency key returns
-              the original payment and does not credit the balance again. Refund posts the reversing debit.
+              the original payment and does not credit the balance again. A lost dispute refunds the ledger. A payout
+              parks available balance in a simulated settlement account.
             </p>
           </div>
           <p className="fine">Fake tokens only. Nothing here settles at a bank.</p>
@@ -174,6 +180,8 @@ function OverviewView({ data, rows }: { data: Overview; rows: Payment[] }) {
             <li>Above $1,000.00, or 3 captures for the same customer in an hour, the payment waits for review.</li>
             <li>Capture credits available balance once. A second capture does not credit again.</li>
             <li>A refund cannot exceed the captured amount, and it debits the balance back.</li>
+            <li>A dispute cannot exceed the captured amount. If an admin marks it lost, that amount is refunded.</li>
+            <li>An admin payout moves available balance into a simulated settlement account marked paid.</li>
           </ul>
         </section>
         <section>
@@ -451,26 +459,28 @@ function LedgerView({ accounts }: { accounts: LedgerAccount[] }) {
     <>
       <h1>Ledger</h1>
       <p className="deck">
-        A capture writes a credit and increases available balance. A refund writes a debit. Both land in the same
-        transaction as the payment status change.
+        A capture writes a credit and increases available balance. A refund writes a debit. A payout debits available
+        balance and credits a simulated settlement account. Each movement lands in one database transaction.
       </p>
       {accounts.length === 0 ? <p className="muted">No ledger accounts.</p> : null}
       {accounts.map((account) => (
-        <section key={account.id} className="ledger-account">
+        <section key={`${account.kind ?? "available"}-${account.id}`} className="ledger-account">
           <header>
             <div>
               <div className="label">
-                {account.merchant_name} · {account.currency}
+                {account.merchant_name} · {account.currency} · {account.kind === "settlement" ? "settlement" : "available"}
               </div>
               <div className="value">{formatMoney(account.balance_cents, account.currency)}</div>
             </div>
-            <p className="hint">Account #{account.id}</p>
+            <p className="hint">
+              {account.kind === "settlement" ? "Simulated settlement" : "Available"} account #{account.id}
+            </p>
           </header>
           <table>
             <thead>
               <tr>
                 <th>When</th>
-                <th>Payment</th>
+                <th>Reference</th>
                 <th>Direction</th>
                 <th>Amount</th>
               </tr>
@@ -484,9 +494,9 @@ function LedgerView({ accounts }: { accounts: LedgerAccount[] }) {
                 </tr>
               ) : null}
               {account.entries.map((entry) => (
-                <tr key={entry.id}>
+                <tr key={`${entry.source ?? "payment"}-${entry.id}`}>
                   <td>{formatWhen(entry.created_at)}</td>
-                  <td>#{entry.payment_id}</td>
+                  <td>{entry.source === "payout" ? `Payout #${entry.payout_id}` : `#${entry.payment_id}`}</td>
                   <td>
                     <span className={`pill ${entry.direction}`}>{entry.direction}</span>
                   </td>
@@ -508,7 +518,9 @@ function AuditView({ rows }: { rows: AuditRow[] }) {
   return (
     <>
       <h1>Audit log</h1>
-      <p className="deck">Admin only. Sign-ins, creates, blocks, captures, and refunds land here.</p>
+      <p className="deck">
+        Admin only. Sign-ins, payments, disputes, payouts, API keys, and outbox delivery land here.
+      </p>
       <div className="table-wrap">
         <table>
           <thead>
@@ -550,14 +562,23 @@ function Console({ person, onLogout }: { person: Me; onLogout: () => void }) {
   const [rows, setRows] = useState<Payment[]>([])
   const [accounts, setAccounts] = useState<LedgerAccount[]>([])
   const [auditRows, setAuditRows] = useState<AuditRow[]>([])
+  const [disputeRows, setDisputeRows] = useState<Dispute[]>([])
+  const [payoutBook, setPayoutBook] = useState<PayoutList>({ payouts: [], settlement_accounts: [] })
+  const [keyRows, setKeyRows] = useState<ApiKeyRow[]>([])
+  const [outboxRows, setOutboxRows] = useState<OutboxEvent[]>([])
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(true)
 
   async function reload() {
-    const [nextOverview, nextPayments, nextLedger] = await Promise.all([overview(), payments(), ledger()])
+    const [nextOverview, nextPayments, nextLedger, nextDisputes, nextPayouts, nextKeys, nextOutbox] =
+      await Promise.all([overview(), payments(), ledger(), disputes(), payouts(), apiKeys(), outbox()])
     setData(nextOverview)
     setRows(nextPayments)
     setAccounts(nextLedger.accounts)
+    setDisputeRows(nextDisputes)
+    setPayoutBook(nextPayouts)
+    setKeyRows(nextKeys)
+    setOutboxRows(nextOutbox)
     if (person.role === "admin" && view === "audit") {
       setAuditRows(await audit())
     }
@@ -599,6 +620,10 @@ function Console({ person, onLogout }: { person: Me; onLogout: () => void }) {
     { id: "overview", label: "Overview" },
     { id: "payments", label: "Payments" },
     { id: "ledger", label: "Ledger" },
+    { id: "disputes", label: "Disputes" },
+    { id: "settlement", label: "Settlement" },
+    { id: "keys", label: "API keys" },
+    { id: "outbox", label: "Outbox" },
   ]
   if (person.role === "admin") links.push({ id: "audit", label: "Audit log" })
 
@@ -660,6 +685,64 @@ function Console({ person, onLogout }: { person: Me; onLogout: () => void }) {
                 />
               ) : null}
               {view === "ledger" ? <LedgerView accounts={accounts} /> : null}
+              {view === "disputes" ? (
+                <DisputesView
+                  role={person.role}
+                  rows={rows}
+                  disputes={disputeRows}
+                  onReload={async () => {
+                    try {
+                      await reload()
+                    } catch (err) {
+                      if (err instanceof ApiError && err.status === 401) onLogout()
+                      else throw err
+                    }
+                  }}
+                />
+              ) : null}
+              {view === "settlement" ? (
+                <SettlementView
+                  role={person.role}
+                  book={payoutBook}
+                  merchants={data.merchants}
+                  onReload={async () => {
+                    try {
+                      await reload()
+                    } catch (err) {
+                      if (err instanceof ApiError && err.status === 401) onLogout()
+                      else throw err
+                    }
+                  }}
+                />
+              ) : null}
+              {view === "keys" ? (
+                <KeysView
+                  role={person.role}
+                  keys={keyRows}
+                  merchants={data.merchants}
+                  onReload={async () => {
+                    try {
+                      await reload()
+                    } catch (err) {
+                      if (err instanceof ApiError && err.status === 401) onLogout()
+                      else throw err
+                    }
+                  }}
+                />
+              ) : null}
+              {view === "outbox" ? (
+                <OutboxView
+                  rows={outboxRows}
+                  onReload={async () => {
+                    try {
+                      await reload()
+                    } catch (err) {
+                      if (err instanceof ApiError && err.status === 401) onLogout()
+                      else throw err
+                    }
+                  }}
+                />
+              ) : null}
               {view === "audit" && person.role === "admin" ? <AuditView rows={auditRows} /> : null}
             </>
           )}

@@ -101,3 +101,87 @@ class AuditLog(Base):
     entity: Mapped[str] = mapped_column(String(64), nullable=False)
     detail: Mapped[str] = mapped_column(Text, nullable=False)
     ts: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+
+class Dispute(Base):
+    __tablename__ = "disputes"
+    __table_args__ = (
+        CheckConstraint("status in ('open', 'won', 'lost')", name="ck_dispute_status"),
+        CheckConstraint("amount_cents > 0", name="ck_dispute_amount"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    payment_id: Mapped[int] = mapped_column(ForeignKey("payments.id"), nullable=False, index=True)
+    merchant_id: Mapped[int] = mapped_column(ForeignKey("merchants.id"), nullable=False, index=True)
+    amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(10), nullable=False)
+    opened_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class SettlementAccount(Base):
+    """Simulated destination for a payout. Not a bank account."""
+
+    __tablename__ = "settlement_accounts"
+    __table_args__ = (
+        UniqueConstraint("merchant_id", "currency", name="uq_settlement_currency"),
+        CheckConstraint("balance_cents >= 0", name="ck_settlement_nonneg"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    merchant_id: Mapped[int] = mapped_column(ForeignKey("merchants.id"), nullable=False, index=True)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    balance_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class Payout(Base):
+    __tablename__ = "payouts"
+    __table_args__ = (
+        UniqueConstraint("merchant_id", "idempotency_key", name="uq_payout_idempotency"),
+        CheckConstraint("status in ('paid')", name="ck_payout_status"),
+        CheckConstraint("amount_cents > 0", name="ck_payout_amount"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    merchant_id: Mapped[int] = mapped_column(ForeignKey("merchants.id"), nullable=False, index=True)
+    idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+
+class ApiKey(Base):
+    """Merchant API credential. The secret is never stored, only key_hash."""
+
+    __tablename__ = "api_keys"
+    __table_args__ = (UniqueConstraint("key_hash", name="uq_api_key_hash"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    merchant_id: Mapped[int] = mapped_column(ForeignKey("merchants.id"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    prefix: Mapped[str] = mapped_column(String(24), nullable=False)
+    key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class OutboxEvent(Base):
+    __tablename__ = "outbox_events"
+    __table_args__ = (
+        CheckConstraint(
+            "event_type in ('payment.captured', 'dispute.lost')",
+            name="ck_outbox_event_type",
+        ),
+        CheckConstraint("status in ('pending', 'sent')", name="ck_outbox_status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    merchant_id: Mapped[int] = mapped_column(ForeignKey("merchants.id"), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

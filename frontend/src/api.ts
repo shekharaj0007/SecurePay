@@ -1,10 +1,17 @@
 import type {
+  ApiKeyCreated,
+  ApiKeyRow,
   AuditRow,
+  Dispute,
   LedgerResponse,
   LoginResponse,
   Me,
+  OutboxDeliver,
+  OutboxEvent,
   Overview,
   Payment,
+  Payout,
+  PayoutList,
 } from "./types"
 
 const TOKEN_KEY = "securepay.token"
@@ -143,5 +150,81 @@ export async function refundPayment(id: number): Promise<Payment> {
     method: "POST",
     body: JSON.stringify({}),
   })
+  return data
+}
+
+export async function disputes(): Promise<Dispute[]> {
+  const { data } = await request<Dispute[]>("/api/disputes")
+  return data
+}
+
+export async function openDispute(
+  paymentId: number,
+  input: { reason: string; amount_cents: number },
+): Promise<Dispute> {
+  const { data } = await request<Dispute>(`/api/payments/${paymentId}/disputes`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  })
+  return data
+}
+
+export async function resolveDispute(id: number, outcome: "won" | "lost"): Promise<Dispute> {
+  const { data } = await request<Dispute>(`/api/disputes/${id}/resolve`, {
+    method: "POST",
+    body: JSON.stringify({ outcome }),
+  })
+  return data
+}
+
+export async function payouts(): Promise<PayoutList> {
+  const { data } = await request<PayoutList>("/api/payouts")
+  return data
+}
+
+export async function createPayout(input: {
+  merchant_id: number
+  amount_cents: number
+  idempotencyKey: string
+}): Promise<{ payout: Payout; replay: boolean }> {
+  const { data, response } = await request<Payout>("/api/payouts", {
+    method: "POST",
+    body: JSON.stringify({
+      merchant_id: input.merchant_id,
+      amount_cents: input.amount_cents,
+      currency: "USD",
+    }),
+    headers: { "Idempotency-Key": input.idempotencyKey },
+  })
+  return { payout: data, replay: response.headers.get("X-Idempotent-Replay") === "true" }
+}
+
+export async function apiKeys(): Promise<ApiKeyRow[]> {
+  const { data } = await request<ApiKeyRow[]>("/api/api-keys")
+  return data
+}
+
+export async function createApiKey(input: { name: string; merchant_id?: number }): Promise<ApiKeyCreated> {
+  const body: Record<string, unknown> = { name: input.name }
+  if (input.merchant_id != null) body.merchant_id = input.merchant_id
+  const { data } = await request<ApiKeyCreated>("/api/api-keys", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+  return data
+}
+
+export async function revokeApiKey(id: number): Promise<ApiKeyRow> {
+  const { data } = await request<ApiKeyRow>(`/api/api-keys/${id}/revoke`, { method: "POST" })
+  return data
+}
+
+export async function outbox(): Promise<OutboxEvent[]> {
+  const { data } = await request<OutboxEvent[]>("/api/outbox")
+  return data
+}
+
+export async function deliverOutbox(): Promise<OutboxDeliver> {
+  const { data } = await request<OutboxDeliver>("/api/outbox/deliver", { method: "POST" })
   return data
 }

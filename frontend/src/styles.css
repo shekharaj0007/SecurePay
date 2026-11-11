@@ -132,7 +132,7 @@ label {
   color: var(--muted);
 }
 
-input, select {
+input, select, textarea {
   width: 100%;
   background: #fffdf8;
   border: 1px solid #d9d0c2;
@@ -140,7 +140,9 @@ input, select {
   padding: 10px 12px;
 }
 
-input:focus, select:focus, button:focus-visible {
+textarea { min-height: 76px; resize: vertical; }
+
+input:focus, select:focus, textarea:focus, button:focus-visible {
   outline: 2px solid var(--navy);
   outline-offset: 2px;
 }
@@ -291,9 +293,9 @@ td {
   font-size: 12px;
   font-weight: 500;
 }
-.pill.captured, .pill.allow, .pill.credit { background: var(--emerald-bg); color: var(--emerald); }
-.pill.review, .pill.created { background: var(--amber-bg); color: var(--amber); }
-.pill.failed, .pill.block, .pill.debit { background: var(--red-bg); color: var(--red); }
+.pill.captured, .pill.allow, .pill.credit, .pill.won, .pill.paid, .pill.sent { background: var(--emerald-bg); color: var(--emerald); }
+.pill.review, .pill.created, .pill.open, .pill.pending { background: var(--amber-bg); color: var(--amber); }
+.pill.failed, .pill.block, .pill.debit, .pill.lost, .pill.revoked { background: var(--red-bg); color: var(--red); }
 .pill.authorized { background: #e7eef5; color: var(--navy); }
 .pill.refunded { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
 td.credit { color: var(--emerald); }
@@ -310,6 +312,25 @@ td.debit { color: var(--red); }
 }
 
 .boot { padding: 48px; }
+
+.secret-box {
+  background: var(--navy);
+  color: #f6f1e7;
+  padding: 12px 14px;
+  margin: 12px 0 0;
+  word-break: break-all;
+  font-size: 14px;
+}
+
+.secret-box strong {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--brass);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 11px;
+}
 
 @media (max-width: 960px) {
   .login, .shell, .split, .split.lower, .stats { grid-template-columns: 1fr; }

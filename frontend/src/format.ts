@@ -32,6 +32,13 @@ export function dollarsToCents(input: string): number | null {
   return cents
 }
 
+export function centsToDollars(cents: number): string {
+  const abs = Math.abs(cents)
+  const whole = Math.floor(abs / 100)
+  const frac = String(abs % 100).padStart(2, "0")
+  return `${cents < 0 ? "-" : ""}${whole}.${frac}`
+}
+
 export function newIdempotencyKey(): string {
   const uuid =
     typeof crypto.randomUUID === "function"
